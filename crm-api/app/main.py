@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="Pulse CRM API", version="0.1.0")
+from .routers import campaigns, receipts
+
+app = FastAPI(title="Pulse CRM API", version="0.2.0")
+app.include_router(receipts.router, tags=["receipts"])
+app.include_router(campaigns.router, tags=["campaigns"])
 
 
 @app.get("/health")
