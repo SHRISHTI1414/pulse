@@ -27,6 +27,7 @@ from ..models import (
 from ..schemas import (
     CampaignCreate,
     CampaignOut,
+    CampaignPatch,
     CampaignSendResult,
     CampaignStats,
     MessageOut,
@@ -100,6 +101,30 @@ def get_campaign(cid: int) -> CampaignOut:
         c = session.get(Campaign, cid)
         if c is None:
             raise HTTPException(404, "campaign not found")
+        return _campaign_out(c, audience_size=_audience_size(c.segment_definition))
+
+
+@router.patch("/campaigns/{cid}", response_model=CampaignOut)
+def patch_campaign(cid: int, patch: CampaignPatch) -> CampaignOut:
+    """Marketer edits — only allowed on drafts."""
+    with SessionLocal() as session:
+        c = session.get(Campaign, cid)
+        if c is None:
+            raise HTTPException(404, "campaign not found")
+        if c.status != CampaignStatus.draft:
+            raise HTTPException(409, f"can only edit drafts, current: {c.status.value}")
+        if patch.name is not None:
+            c.name = patch.name
+        if patch.segment_definition is not None:
+            if "customer_ids" not in patch.segment_definition:
+                raise HTTPException(422, "segment_definition must include customer_ids")
+            c.segment_definition = patch.segment_definition
+        if patch.message_templates is not None:
+            if "default" not in patch.message_templates:
+                raise HTTPException(422, "message_templates must include a 'default' tier")
+            c.message_templates = patch.message_templates
+        session.commit()
+        session.refresh(c)
         return _campaign_out(c, audience_size=_audience_size(c.segment_definition))
 
 

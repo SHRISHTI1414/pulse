@@ -80,3 +80,78 @@ class CampaignStats(BaseModel):
     audience_size: int
     by_status: dict[str, int]
     by_channel: dict[str, dict[str, int]]
+
+
+class CampaignPatch(BaseModel):
+    """Marketer edit endpoint — allow tweaking name + templates + segment.
+
+    All fields optional; only provided ones are applied. Status-changing edits
+    (approve, send) have their own endpoints.
+    """
+
+    name: str | None = None
+    segment_definition: dict[str, Any] | None = None
+    message_templates: dict[str, Any] | None = None
+
+
+# ── Opportunities / facts (Phase 3) ─────────────────────────────────────────
+
+
+class FactOut(BaseModel):
+    fact_id: str
+    label: str
+    value: Any
+    query_ref: str
+
+
+class GeneratedOpportunityItem(BaseModel):
+    title: str
+    cohort_ref: Literal["lapsed_regulars", "delivery_drift", "festive_onetimers"]
+    reasoning: str  # may reference {fact:fX}
+    priority_rank: int
+    recommended_action: str
+
+
+class GeneratedOpportunitiesEnvelope(BaseModel):
+    """Schema the LLM must emit. The envelope is enforced via Pydantic."""
+
+    opportunities: list[GeneratedOpportunityItem]
+
+
+class OpportunityOut(BaseModel):
+    id: int
+    generated_at: datetime
+    title: str
+    cohort_definition: dict[str, Any]
+    facts: list[FactOut]
+    llm_reasoning: str
+    priority_rank: int
+    status: str
+
+
+class FactResolveOut(BaseModel):
+    fact_id: str
+    label: str
+    description: str
+    cohort_ref: str
+    resolved_at: str
+    row_count: int
+    rows: list[dict[str, Any]]
+
+
+# ── Draft campaign (Phase 3 second Groq call) ───────────────────────────────
+
+
+class MessageTier(BaseModel):
+    name: str
+    whatsapp: str
+    sms: str
+
+
+class DraftCampaignEnvelope(BaseModel):
+    """Schema the LLM must emit for draft-campaign."""
+
+    name: str
+    tiers: list[MessageTier]
+    channel_strategy: str
+    suggested_send_time: str
