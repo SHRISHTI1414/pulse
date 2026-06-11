@@ -155,3 +155,61 @@ class DraftCampaignEnvelope(BaseModel):
     tiers: list[MessageTier]
     channel_strategy: str
     suggested_send_time: str
+
+
+# ── Orders ingestion + attribution (Phase 4) ────────────────────────────────
+
+
+class OrderIngestIn(BaseModel):
+    customer_id: int
+    store_id: int
+    order_channel: Literal["dine_in", "takeaway", "delivery"]
+    total_amount: float
+    items_summary: str
+    ordered_at: datetime
+
+
+class AttributionOut(BaseModel):
+    id: int
+    order_id: int
+    campaign_id: int
+    message_id: int
+    model: str
+    created_at: datetime
+
+
+class OrderIngestOut(BaseModel):
+    order_id: int
+    attribution: AttributionOut | None
+
+
+class RecoverySimResult(BaseModel):
+    campaign_id: int
+    eligible_customers: int
+    orders_simulated: int
+    attributions_created: int
+    recovered_revenue_inr: float
+
+
+# ── Extended stats (Phase 4) ────────────────────────────────────────────────
+
+
+class CampaignStatsFull(BaseModel):
+    campaign_id: int
+    status: str
+    audience_size: int
+    by_status: dict[str, int]
+    by_channel: dict[str, dict[str, int]]
+    attributed_orders: int
+    recovered_revenue_inr: float
+    recovery_rate_pct: float
+
+
+# ── Debrief (Phase 4) ───────────────────────────────────────────────────────
+
+
+class DebriefEnvelope(BaseModel):
+    """LLM-emitted debrief narrative. Cites only provided stat-facts."""
+
+    narrative: str  # 3–4 sentences citing {fact:fX}
+    what_id_try_next: str  # one line

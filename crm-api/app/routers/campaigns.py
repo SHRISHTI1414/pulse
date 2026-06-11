@@ -16,13 +16,16 @@ from sqlalchemy import func, insert, select
 
 from ..config import settings
 from ..db import SessionLocal
+from ..llm import LLMError, groq_chat_json
 from ..models import (
+    Attribution,
     Campaign,
     CampaignStatus,
     Customer,
     Message,
     MessageChannel,
     MessageStatus,
+    Order,
 )
 from ..schemas import (
     CampaignCreate,
@@ -30,6 +33,8 @@ from ..schemas import (
     CampaignPatch,
     CampaignSendResult,
     CampaignStats,
+    CampaignStatsFull,
+    DebriefEnvelope,
     MessageOut,
 )
 
@@ -256,8 +261,8 @@ def list_messages(cid: int, limit: int = 50) -> list[MessageOut]:
         ]
 
 
-@router.get("/campaigns/{cid}/stats", response_model=CampaignStats)
-def campaign_stats(cid: int) -> CampaignStats:
+@router.get("/campaigns/{cid}/stats", response_model=CampaignStatsFull)
+def campaign_stats(cid: int) -> CampaignStatsFull:
     with SessionLocal() as session:
         c = session.get(Campaign, cid)
         if c is None:
@@ -276,10 +281,87 @@ def campaign_stats(cid: int) -> CampaignStats:
             by_status[st.value] = by_status.get(st.value, 0) + n
             by_channel.setdefault(channel.value, {})[st.value] = n
 
-        return CampaignStats(
+        # Attribution roll-up — uses Order.total_amount for true recovered ₹.
+        attr_count, recovered = session.execute(
+            select(func.count(Attribution.id), func.coalesce(func.sum(Order.total_amount), 0))
+            .select_from(Attribution)
+            .join(Order, Order.id == Attribution.order_id)
+            .where(Attribution.campaign_id == cid)
+        ).one()
+
+        audience_size = _audience_size(c.segment_definition)
+        recovery_rate = round(100.0 * (attr_count or 0) / audience_size, 1) if audience_size else 0.0
+
+        return CampaignStatsFull(
             campaign_id=cid,
             status=c.status.value,
-            audience_size=_audience_size(c.segment_definition),
+            audience_size=audience_size,
             by_status=by_status,
             by_channel=by_channel,
+            attributed_orders=int(attr_count or 0),
+            recovered_revenue_inr=float(recovered or 0),
+            recovery_rate_pct=recovery_rate,
         )
+
+
+# ── Debrief ────────────────────────────────────────────────────────────────
+
+
+def _debrief_system_prompt() -> str:
+    return """You are writing a one-paragraph campaign post-mortem for the Brew Street marketing team.
+
+HARD RULES:
+1. Only cite numbers from the provided STAT FACTS using {fact:fX} placeholders. NEVER invent or compute figures. If a number is not in STAT FACTS, do not mention it.
+2. Write 3–4 tight sentences for `narrative`. Plain prose. Mention what worked, what didn't, the recovered revenue and recovery rate.
+3. For `what_id_try_next`: one line, concrete next step (e.g. "Test a Tuesday-morning send for the same cohort").
+4. Reply with ONLY valid JSON matching the requested schema. No prose outside JSON, no markdown fences.
+"""
+
+
+def _debrief_user_prompt(stats: dict, stat_facts: list[dict]) -> str:
+    import json
+
+    return f"""Campaign id: {stats['campaign_id']}
+Status: {stats['status']}
+By status: {json.dumps(stats['by_status'])}
+By channel: {json.dumps(stats['by_channel'])}
+
+STAT FACTS you may cite (only via {{fact:fX}}):
+{json.dumps(stat_facts, indent=2)}
+
+Output JSON:
+{{
+  "narrative": "<3–4 sentences citing stat-facts inline>",
+  "what_id_try_next": "<one line>"
+}}"""
+
+
+@router.post("/campaigns/{cid}/debrief", response_model=DebriefEnvelope)
+def campaign_debrief(cid: int) -> DebriefEnvelope:
+    """Third Groq call — narrate the campaign outcome, citing only stat-facts."""
+    stats_full = campaign_stats(cid)
+    by_status = stats_full.by_status
+
+    # Build stat-facts the LLM can cite. Stats facts use the same shape as the
+    # cohort facts so the LLM doesn't need a different prompt vocabulary.
+    stat_facts = [
+        {"fact_id": "f_audience_size", "label": "Audience size", "value": stats_full.audience_size, "query_ref": "campaign.audience"},
+        {"fact_id": "f_delivered", "label": "Delivered count", "value": by_status.get("delivered", 0) + by_status.get("read", 0) + by_status.get("clicked", 0), "query_ref": "messages.delivered_or_more"},
+        {"fact_id": "f_read", "label": "Read count (WhatsApp only)", "value": by_status.get("read", 0) + by_status.get("clicked", 0), "query_ref": "messages.read_or_more"},
+        {"fact_id": "f_clicked", "label": "Clicked count", "value": by_status.get("clicked", 0), "query_ref": "messages.clicked"},
+        {"fact_id": "f_failed", "label": "Failed count", "value": by_status.get("failed", 0), "query_ref": "messages.failed"},
+        {"fact_id": "f_attributed_orders", "label": "Attributed orders", "value": stats_full.attributed_orders, "query_ref": "attributions.count"},
+        {"fact_id": "f_recovered_revenue_inr", "label": "Recovered revenue (INR)", "value": stats_full.recovered_revenue_inr, "query_ref": "attributions.revenue_sum"},
+        {"fact_id": "f_recovery_rate_pct", "label": "Recovery rate (%)", "value": stats_full.recovery_rate_pct, "query_ref": "attributions.rate"},
+    ]
+
+    try:
+        envelope = groq_chat_json(
+            system=_debrief_system_prompt(),
+            user=_debrief_user_prompt(stats_full.model_dump(), stat_facts),
+            schema_model=DebriefEnvelope,
+        )
+    except LLMError as e:
+        raise HTTPException(502, f"LLM error: {e}") from e
+
+    return envelope
