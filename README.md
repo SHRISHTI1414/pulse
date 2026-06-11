@@ -30,7 +30,7 @@ A marketer at a multi-outlet QSR brand cannot see churn while it's happening. A 
 │              │  async receipt │  outcomes + chaos │
 │  Postgres    │   callbacks    └──────────────────┘
 │  (Neon)      │
-│  Claude API  │ ◀── Strategist / compose / debrief prompts
+│  Groq API    │ ◀── Strategist / compose / debrief prompts
 └──────┬───────┘
        │ REST
 ┌──────▼───────┐
@@ -39,7 +39,7 @@ A marketer at a multi-outlet QSR brand cannot see churn while it's happening. A 
 ```
 
 - **Two repos** (submission requirement): `pulse-crm-backend` (this repo: `crm-api/` + `channel-service/` + `scripts/` + `docs/`) and `pulse-crm-frontend` (`pulse-web`).
-- **LLM:** Anthropic Claude via API. Key in env (`ANTHROPIC_API_KEY`), never committed. Strict rule across all prompts: **the model may only cite numbers provided to it as computed facts; it never computes or invents figures.**
+- **LLM:** Groq API, model `llama-3.1-8b-instant` (free tier). Key in env (`GROQ_API_KEY`), never committed. Strict rule across all prompts: **the model may only cite numbers provided to it as computed facts; it never computes or invents figures.** Because the chosen model is small, Phase 3 enforces this with Groq's JSON mode + Pydantic schema validation + a single retry on schema failure.
 - **Channels modeled:** WhatsApp + SMS only (the authentic Indian-retail pair). SMS has no `read` state — the state machine encodes per-channel reality.
 
 ## 4. Data model (8 tables)
@@ -79,9 +79,9 @@ Verification: `scripts/verify_patterns.sql` — counts within ±10%, hero cohort
 ## 7. Phase 3 — The AI Strategist
 
 - `scripts/facts.py` / `app/facts.py`: named fact queries (each has `query_ref`): lapsed-regulars cohort + count + trailing-6mo value + annualized value + store concentration; delivery-drift cohort + decay %; festive cohort + repeat rate; per-cohort WhatsApp opt-in/engagement split. Output: facts jsonb array.
-- `POST /opportunities/generate` → compute facts → single Claude call → **strict JSON out**: ranked opportunities `[{title, cohort_ref, reasoning (must reference fact_ids inline like {fact:f3}), priority_rank, recommended_action}]` → persist. Prompt rules: cite only provided fact_ids; no invented numbers; rank by recoverable value × recovery odds; explicitly deprioritize poor-odds cohorts with stated reason.
+- `POST /opportunities/generate` → compute facts → single Groq call (JSON mode + Pydantic validation + 1 retry) → **strict JSON out**: ranked opportunities `[{title, cohort_ref, reasoning (must reference fact_ids inline like {fact:f3}), priority_rank, recommended_action}]` → persist. Prompt rules: cite only provided fact_ids; no invented numbers; rank by recoverable value × recovery odds; explicitly deprioritize poor-odds cohorts with stated reason.
 - `GET /opportunities`, `GET /facts/{fact_id}/resolve` → re-runs the underlying query live, returns rows (powers **clickable evidence chips**).
-- `POST /opportunities/{id}/draft-campaign` → second Claude call: audience (from cohort_definition), 2–3 message tiers (grounded in actual cohort attributes, e.g. last-visited store name, favourite item category), channel strategy (WhatsApp if opt-in & engaged, else SMS), suggested send time. Marketer edit endpoints: `PATCH /campaigns/{id}`.
+- `POST /opportunities/{id}/draft-campaign` → second Groq call: audience (from cohort_definition), 2–3 message tiers (grounded in actual cohort attributes, e.g. last-visited store name, favourite item category), channel strategy (WhatsApp if opt-in & engaged, else SMS), suggested send time. Marketer edit endpoints: `PATCH /campaigns/{id}`.
 - **Phase gate:** hero flow runs end-to-end via API: generate → inspect facts → draft → edit → approve → send (Phase 2 pipeline) → receipts land.
 
 ## 8. Phase 4 — Attribution, insights, debrief
@@ -89,7 +89,7 @@ Verification: `scripts/verify_patterns.sql` — counts within ±10%, hero cohort
 - **Recovery simulation:** `POST /simulate/recovery` on channel-service (or script) — for a configurable fraction (~25%) of customers whose message reached `read`/`clicked`, POST a new realistic order to crm-api **`POST /orders/ingest`** (public ingestion API — this is also the brief's "ingest" capability, exercised live) with 1–5 day simulated delay compressed for demo.
 - **Attribution:** on order ingestion, if customer has an engaged message (delivered+read or clicked) within the past 7 days → create attribution (`last_touch_7d`). Stated limitation in README: last-touch over-credits; no holdout group; acceptable and disclosed for this scope.
 - `GET /campaigns/{id}/stats` → funnel (queued/sent/delivered/read/clicked/failed), per-channel split, attributed orders + recovered revenue (₹), recovery rate vs cohort size.
-- **Debrief:** `POST /campaigns/{id}/debrief` → Claude writes a short narrative citing only the computed stats (same fact-id discipline), incl. "what I'd try next".
+- **Debrief:** `POST /campaigns/{id}/debrief` → Groq writes a short narrative citing only the computed stats (same fact-id discipline), incl. "what I'd try next".
 - **Phase gate:** demo sequence works: send (hostile mode) → receipts settle → simulate recovery → recovered-revenue counter moves with attributions visible.
 
 ## 9. Phase 5 — Frontend (pulse-web) + deployment
@@ -116,7 +116,8 @@ Built for ~10k messages/campaign: in-process async dispatch, batched sends, Post
 ```
 # crm-api
 DATABASE_URL=postgresql+psycopg://...
-ANTHROPIC_API_KEY=sk-ant-...
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=llama-3.1-8b-instant
 CHANNEL_SERVICE_URL=http://localhost:8001
 
 # channel-service
