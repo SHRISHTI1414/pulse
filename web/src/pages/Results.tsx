@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { CampaignStats, Debrief } from '../lib/types'
@@ -30,11 +30,13 @@ export default function Results() {
   const [debriefing, setDebriefing] = useState(false)
   const [simBusy, setSimBusy] = useState(false)
   const [simResult, setSimResult] = useState<string | null>(null)
+  const [lastTickAt, setLastTickAt] = useState<number>(Date.now())
 
   const fetchStats = useCallback(async () => {
     try {
       const s = await api.campaignStats(cid)
       setStats(s)
+      setLastTickAt(Date.now())
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -53,7 +55,7 @@ export default function Results() {
     try {
       const r = await api.simulateRecovery(cid, 0.25)
       setSimResult(
-        `Simulated ${r.orders_simulated} orders → ${r.attributions_created} attributions → ₹${r.recovered_revenue_inr.toLocaleString('en-IN')}`,
+        `Simulated ${r.orders_simulated} returning customers — ${r.attributions_created} attributed to this campaign — ₹${r.recovered_revenue_inr.toLocaleString('en-IN')} recovered.`,
       )
       await fetchStats()
     } catch (e) {
@@ -75,10 +77,22 @@ export default function Results() {
     }
   }
 
+  const story = useMemo(() => {
+    if (!stats) return null
+    const total = Object.values(stats.by_status).reduce((a, b) => a + b, 0)
+    const engaged =
+      (stats.by_status.delivered ?? 0) +
+      (stats.by_status.read ?? 0) +
+      (stats.by_status.clicked ?? 0)
+    const clicked = stats.by_status.clicked ?? 0
+    const failed = stats.by_status.failed ?? 0
+    return { total, engaged, clicked, failed }
+  }, [stats])
+
   if (!stats && !error) {
     return (
       <div className="flex items-center gap-2 text-gray-500 py-12">
-        <Spinner size={18} /> Loading stats…
+        <Spinner size={18} /> Loading the campaign…
       </div>
     )
   }
@@ -86,67 +100,92 @@ export default function Results() {
   if (error && !stats) {
     return <ErrorState message={error} onRetry={fetchStats} />
   }
-
-  if (!stats) return null
-
-  const totalMessages = Object.values(stats.by_status).reduce((a, b) => a + b, 0)
-  const engaged =
-    (stats.by_status.delivered ?? 0) +
-    (stats.by_status.read ?? 0) +
-    (stats.by_status.clicked ?? 0)
+  if (!stats || !story) return null
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      {/* Top bar */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <Link to={`/campaigns/${cid}`} className="text-sm text-gray-500 hover:text-gray-700">
-            ← Campaign
+            ← Back to campaign
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-gray-900">Results</h1>
-          <p className="text-sm text-gray-500 mt-1">Polling every {POLL_MS / 1000}s</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={runRecovery} disabled={simBusy}>
-            {simBusy ? <><Spinner size={14} /> Simulating…</> : 'Simulate recovery'}
-          </Button>
+          <h1 className="mt-2 text-2xl font-semibold text-gray-900">Live campaign results</h1>
+          <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Updating every {POLL_MS / 1000}s · last refresh {Math.max(0, Math.round((Date.now() - lastTickAt) / 1000))}s ago
+          </p>
         </div>
       </div>
 
-      {simResult && (
-        <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
-          {simResult}
-        </div>
-      )}
-
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Audience" value={stats.audience_size.toLocaleString('en-IN')} />
-        <Stat label="Engaged (delivered+)" value={engaged.toLocaleString('en-IN')} />
-        <Stat
-          label="Recovered revenue"
-          value={`₹${stats.recovered_revenue_inr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-          emphasis
-        />
-        <Stat label="Recovery rate" value={`${stats.recovery_rate_pct.toFixed(1)}%`} />
-      </div>
-
-      <Card className="p-6">
-        <h2 className="text-base font-semibold text-gray-900">Funnel</h2>
-        <p className="text-xs text-gray-500 mt-1">{totalMessages.toLocaleString('en-IN')} messages</p>
-        <div className="mt-4">
-          <FunnelBar byStatus={stats.by_status} total={totalMessages} />
+      {/* Hero — recovered revenue */}
+      <Card className="p-7 bg-gradient-to-br from-brand-600 to-brand-700 border-brand-700 text-white">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-white/70">Revenue recovered</div>
+            <div className="mt-1 text-5xl font-semibold tabular-nums">
+              ₹{stats.recovered_revenue_inr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </div>
+            <div className="mt-1 text-sm text-white/80">
+              from {stats.attributed_orders.toLocaleString('en-IN')} attributed order{stats.attributed_orders === 1 ? '' : 's'} ·
+              {' '}{stats.recovery_rate_pct.toFixed(1)}% of the audience came back
+            </div>
+          </div>
+          <div className="hidden sm:block text-right">
+            <div className="text-xs uppercase tracking-wider text-white/70">Sent to</div>
+            <div className="text-2xl font-semibold tabular-nums">
+              {stats.audience_size.toLocaleString('en-IN')}
+            </div>
+            <div className="text-xs text-white/70">customers</div>
+          </div>
         </div>
       </Card>
 
+      {/* The story */}
+      <StoryStrip
+        total={story.total}
+        engaged={story.engaged}
+        clicked={story.clicked}
+        attributed={stats.attributed_orders}
+      />
+
+      {/* Simulation banner */}
+      {simResult && (
+        <div className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-md px-4 py-3 flex items-start gap-3">
+          <span className="text-lg leading-none">✓</span>
+          <p>{simResult}</p>
+        </div>
+      )}
+
+      {/* Funnel */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Delivery funnel</h2>
+            <p className="text-xs text-gray-500">
+              {story.total.toLocaleString('en-IN')} messages total · how many made it to the customer
+            </p>
+          </div>
+        </div>
+        <FunnelBar byStatus={stats.by_status} total={story.total} />
+      </Card>
+
+      {/* By channel */}
       <Card className="p-6">
         <h2 className="text-base font-semibold text-gray-900">By channel</h2>
-        <div className="mt-4 grid sm:grid-cols-2 gap-6">
+        <p className="text-xs text-gray-500 mt-1">
+          WhatsApp reaches further (read receipts available) but SMS catches everyone else.
+        </p>
+        <div className="mt-5 grid md:grid-cols-2 gap-6">
           {Object.entries(stats.by_channel).map(([channel, dist]) => {
             const channelTotal = Object.values(dist).reduce((a, b) => a + b, 0)
             return (
               <div key={channel}>
                 <div className="flex items-baseline justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-700 uppercase">{channel}</span>
-                  <span className="text-xs text-gray-500">{channelTotal.toLocaleString('en-IN')}</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    {channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
+                  </span>
+                  <span className="text-xs text-gray-500">{channelTotal.toLocaleString('en-IN')} messages</span>
                 </div>
                 <FunnelBar byStatus={dist} total={channelTotal} />
               </div>
@@ -155,12 +194,31 @@ export default function Results() {
         </div>
       </Card>
 
+      {/* Recovery sim — explained */}
       <Card className="p-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
+            <h2 className="text-base font-semibold text-gray-900">Demo: simulate customers coming back</h2>
+            <p className="text-sm text-gray-500 mt-1 max-w-2xl">
+              In a real run we'd wait days for engaged customers to walk in and order again.
+              For this demo, click below to fast-forward: Pulse picks 25% of engaged customers,
+              creates realistic returning orders for them, and attributes those orders to this
+              campaign — exactly the same logic that fires on real order ingestion.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={runRecovery} disabled={simBusy}>
+            {simBusy ? <><Spinner size={14} /> Simulating…</> : 'Fast-forward returning customers'}
+          </Button>
+        </div>
+      </Card>
+
+      {/* AI debrief */}
+      <Card className="p-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
             <h2 className="text-base font-semibold text-gray-900">AI debrief</h2>
             <p className="text-xs text-gray-500 mt-1">
-              A narrative summary that cites only the campaign's computed stats.
+              A short narrative — cites only the campaign's measured stats, never invented numbers.
             </p>
           </div>
           <Button variant="secondary" onClick={runDebrief} disabled={debriefing}>
@@ -168,17 +226,20 @@ export default function Results() {
           </Button>
         </div>
         {debrief && (
-          <div className="mt-4 space-y-3">
-            <p className="text-sm leading-relaxed text-gray-800">
-              {renderDebriefText(debrief.narrative, stats)}
-            </p>
-            <div className="border-t border-gray-100 pt-3">
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-400 mr-2">
-                What I'd try next
-              </span>
-              <span className="text-sm text-gray-800">
+          <div className="mt-5 flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-gray-900 text-white flex items-center justify-center text-sm font-bold shrink-0">
+              ✦
+            </div>
+            <div className="flex-1 min-w-0 space-y-3">
+              <div className="bg-gray-50 border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed text-gray-800">
+                {renderDebriefText(debrief.narrative, stats)}
+              </div>
+              <div className="bg-brand-50 border border-brand-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed text-gray-800">
+                <span className="text-xs font-semibold uppercase tracking-wide text-brand-700 block mb-1">
+                  What I'd try next
+                </span>
                 {renderDebriefText(debrief.what_id_try_next, stats)}
-              </span>
+              </div>
             </div>
           </div>
         )}
@@ -187,31 +248,45 @@ export default function Results() {
   )
 }
 
-function Stat({
-  label,
-  value,
-  emphasis,
+// ── Story strip — turns numbers into a sentence with arrows ──────────────
+
+function StoryStrip({
+  total,
+  engaged,
+  clicked,
+  attributed,
 }: {
-  label: string
-  value: string
-  emphasis?: boolean
+  total: number
+  engaged: number
+  clicked: number
+  attributed: number
 }) {
+  const cells: { value: number; label: string; sub: string }[] = [
+    { value: total, label: 'sent', sub: 'messages dispatched' },
+    { value: engaged, label: 'saw the message', sub: 'delivered or opened' },
+    { value: clicked, label: 'tapped the link', sub: 'highest engagement signal' },
+    { value: attributed, label: 'came back to order', sub: 'attributed within 7 days' },
+  ]
   return (
-    <Card className="p-4">
-      <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
-      <div
-        className={`mt-1 text-2xl font-semibold tabular-nums ${
-          emphasis ? 'text-brand-600' : 'text-gray-900'
-        }`}
-      >
-        {value}
+    <Card className="p-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {cells.map((c, i) => (
+          <div key={i} className="relative">
+            <div className="text-2xl font-semibold text-gray-900 tabular-nums">
+              {c.value.toLocaleString('en-IN')}
+            </div>
+            <div className="text-sm text-gray-700 mt-0.5">{c.label}</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">{c.sub}</div>
+            {i < cells.length - 1 && (
+              <div className="absolute top-2 -right-2 hidden sm:block text-gray-300">→</div>
+            )}
+          </div>
+        ))}
       </div>
     </Card>
   )
 }
 
-// Render debrief text — the LLM cites stat-facts as {fact:fX}. We resolve those
-// to the live values from `stats` so the reader sees real numbers, not placeholders.
 function renderDebriefText(text: string, stats: CampaignStats) {
   const replacements: Record<string, string> = {
     f_audience_size: stats.audience_size.toLocaleString('en-IN'),

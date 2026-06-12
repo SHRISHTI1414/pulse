@@ -11,7 +11,7 @@ export default function Header() {
     let cancelled = false
     api.getChannelConfig()
       .then((c) => { if (!cancelled) setCfg(c) })
-      .catch(() => { /* fail quietly — channel-service may be down */ })
+      .catch(() => { /* fail quietly */ })
     return () => { cancelled = true }
   }, [])
 
@@ -31,40 +31,23 @@ export default function Header() {
 
   return (
     <header className="border-b border-gray-200 bg-white">
-      <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-6">
-        <NavLink to="/opportunities" className="font-semibold text-gray-900 text-lg tracking-tight">
-          <span className="text-brand-600">Pulse</span>
-          <span className="text-gray-400 text-sm font-normal ml-2">Brew Street CRM</span>
+      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-6">
+        <NavLink to="/opportunities" className="flex items-baseline gap-2">
+          <span className="font-semibold text-brand-600 text-xl tracking-tight">Pulse</span>
+          <span className="text-gray-400 text-xs hidden sm:inline">
+            — find the revenue your customers are quietly walking away with
+          </span>
         </NavLink>
 
-        <nav className="hidden sm:flex items-center gap-1 text-sm">
-          <NavTab to="/opportunities">Opportunities</NavTab>
-        </nav>
-
         <div className="ml-auto flex items-center gap-3">
-          <ChaosToggle mode={cfg?.mode ?? null} busy={busy} onFlip={flip} />
+          <DemoModeToggle mode={cfg?.mode ?? null} busy={busy} onFlip={flip} />
         </div>
       </div>
     </header>
   )
 }
 
-function NavTab({ to, children }: { to: string; children: React.ReactNode }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) =>
-        `px-3 py-1.5 rounded-md transition-colors ${
-          isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:text-gray-900'
-        }`
-      }
-    >
-      {children}
-    </NavLink>
-  )
-}
-
-function ChaosToggle({
+function DemoModeToggle({
   mode,
   busy,
   onFlip,
@@ -74,9 +57,7 @@ function ChaosToggle({
   onFlip: () => void
 }) {
   if (mode === null) {
-    return (
-      <span className="text-xs text-gray-400">channel-service offline</span>
-    )
+    return <span className="text-xs text-gray-400 italic">channel service offline</span>
   }
   const hostile = mode === 'hostile'
   return (
@@ -85,15 +66,19 @@ function ChaosToggle({
       disabled={busy}
       className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors disabled:opacity-50 ${
         hostile
-          ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+          ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
           : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
       }`}
-      title="Toggle channel-service chaos mode"
+      title={
+        hostile
+          ? 'Simulated chaos: messages arrive out of order, with duplicates and delays. Tests system resilience.'
+          : 'Smooth delivery: messages arrive in order, on time, no duplicates.'
+      }
     >
       <span
-        className={`inline-block w-2 h-2 rounded-full ${hostile ? 'bg-red-500' : 'bg-emerald-500'}`}
+        className={`inline-block w-2 h-2 rounded-full ${hostile ? 'bg-amber-500' : 'bg-emerald-500'}`}
       />
-      <span className="uppercase tracking-wide">{mode}</span>
+      <span>Delivery sim: <span className="font-semibold">{hostile ? 'chaotic' : 'smooth'}</span></span>
     </button>
   )
 }
