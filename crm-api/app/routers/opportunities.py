@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from ..db import SessionLocal
@@ -207,6 +208,27 @@ def list_opportunities() -> list[OpportunityOut]:
             ).scalars()
         )
         return [_opportunity_out(o) for o in rows]
+
+
+class OpportunityPatch(BaseModel):
+    status: OpportunityStatus
+
+
+@router.patch("/opportunities/{oid}", response_model=OpportunityOut)
+def patch_opportunity(oid: int, body: OpportunityPatch) -> OpportunityOut:
+    """Marketer action — set an opportunity to dismissed / open / actioned.
+
+    Dismiss is treated as 'not now' — the next /opportunities/generate will
+    produce a fresh row if the cohort still exists. We never delete history.
+    """
+    with SessionLocal() as session:
+        opp = session.get(Opportunity, oid)
+        if opp is None:
+            raise HTTPException(404, "opportunity not found")
+        opp.status = body.status
+        session.commit()
+        session.refresh(opp)
+        return _opportunity_out(opp)
 
 
 @router.get("/facts/{fact_id}/resolve", response_model=FactResolveOut)

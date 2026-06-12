@@ -103,3 +103,19 @@ export interface RecoveryResult {
   attributions_created: number
   recovered_revenue_inr: number
 }
+
+export interface AudienceCustomer {
+  id: number
+  name: string
+  home_store: string
+  pre_lapse_orders: number | null
+  pre_lapse_monthly_spend: number | null
+  last_order_at: string | null
+  avg_lifetime_value: number | null
+}
+
+export interface AudienceSample {
+  cohort_ref: string
+  sample_size: number
+  rows: AudienceCustomer[]
+}

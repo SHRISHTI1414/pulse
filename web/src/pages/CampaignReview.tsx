@@ -124,28 +124,23 @@ export default function CampaignReview() {
 
       {error && <ErrorState message={error} />}
 
-      {/* Audience block — plain English */}
-      <Card className="p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-base font-semibold text-gray-900">Who this will go to</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              {cohort?.description ?? 'A specific group of customers selected for this campaign.'}
-            </p>
+      {/* Audience: one-line summary. Full audience view lives on the
+          Cohort Detail screen (Screen 2). Don't repeat that work here. */}
+      <Card className="p-4 bg-gray-50 border-gray-200">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-sm text-gray-700">
+            <span className="font-semibold text-gray-900">{customerIds.length.toLocaleString('en-IN')} customers</span>
+            {cohort && <span className="text-gray-500"> · {cohort.title}</span>}
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-3xl font-semibold text-gray-900 tabular-nums">
-              {customerIds.length.toLocaleString('en-IN')}
-            </div>
-            <div className="text-xs text-gray-500">customers</div>
-          </div>
+          {campaign.opportunity_id && (
+            <Link
+              to={`/opportunities/${campaign.opportunity_id}`}
+              className="ml-auto text-xs text-brand-700 hover:underline"
+            >
+              See the full audience ↗
+            </Link>
+          )}
         </div>
-        {campaign.segment_definition?.channel_strategy && (
-          <div className="mt-4 pt-4 border-t border-gray-100 text-sm text-gray-700">
-            <span className="text-xs uppercase tracking-wide text-gray-400 mr-2">AI sends via</span>
-            {campaign.segment_definition.channel_strategy}
-          </div>
-        )}
       </Card>
 
       {/* Message editor + live preview */}

@@ -1,6 +1,7 @@
 // Tiny fetch wrapper. One file, one base URL, typed helpers.
 
 import type {
+  AudienceSample,
   Campaign,
   CampaignDetail,
   CampaignSendResult,
@@ -52,6 +53,19 @@ export const api = {
   resolveFact: (factId: string) => request<FactResolve>(`/facts/${factId}/resolve`),
   draftCampaign: (oppId: number) =>
     request<Campaign>(`/opportunities/${oppId}/draft-campaign`, { method: 'POST' }),
+  getOpportunity: (oid: number) =>
+    request<Opportunity[]>(`/opportunities`).then((list) => {
+      const found = list.find((o) => o.id === oid)
+      if (!found) throw new ApiError(404, `opportunity ${oid} not found`)
+      return found
+    }),
+  patchOpportunity: (oid: number, status: 'open' | 'actioned' | 'dismissed') =>
+    request<Opportunity>(`/opportunities/${oid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  audienceSample: (oid: number, limit = 10) =>
+    request<AudienceSample>(`/opportunities/${oid}/audience-sample?limit=${limit}`),
 
   // Campaigns
   getCampaign: (cid: number) => request<CampaignDetail>(`/campaigns/${cid}`),

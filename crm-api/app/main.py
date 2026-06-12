@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import (
+    audience,
     campaigns,
     channel_config,
     opportunities,
@@ -25,6 +26,7 @@ app.add_middleware(
 app.include_router(receipts.router, tags=["receipts"])
 app.include_router(campaigns.router, tags=["campaigns"])
 app.include_router(opportunities.router, tags=["opportunities"])
+app.include_router(audience.router, tags=["opportunities"])
 app.include_router(orders.router, tags=["orders"])
 app.include_router(simulate.router, tags=["simulate"])
 app.include_router(channel_config.router, tags=["channel-config"])
