@@ -10,7 +10,7 @@ import Card from '../components/Card'
 import Spinner from '../components/Spinner'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
-import PageGuide from '../components/PageGuide'
+ 
 import RecoveryMeter, { recoveryLevelFromRef } from '../components/RecoveryMeter'
 
 export default function Opportunities() {
