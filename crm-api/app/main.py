@@ -1,6 +1,10 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .db import engine
+from .models import Base
 from .routers import (
     audience,
     campaigns,
@@ -11,7 +15,19 @@ from .routers import (
     simulate,
 )
 
-app = FastAPI(title="Pulse CRM API", version="0.5.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure the schema exists before serving traffic. create_all is
+    # idempotent — it only CREATEs tables/enums that are missing — so it is
+    # safe on every boot. This is what guarantees a fresh Railway Postgres
+    # has the campaigns / opportunities / … tables without a manual
+    # `python scripts/create_tables.py` step.
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="Pulse CRM API", version="0.5.0", lifespan=lifespan)
 
 # CORS — Vite dev server on 5173, plus loose Vercel preview URLs in prod.
 # Wildcard for dev; tighten via env once we know the prod origin.
