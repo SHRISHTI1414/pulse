@@ -64,10 +64,16 @@ def groq_chat_json(
             "temperature": temperature,
             "response_format": {"type": "json_object"},
         }
-        with httpx.Client(timeout=timeout_s) as client:
-            r = client.post(GROQ_URL, headers=headers, json=body)
-        r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                r = client.post(GROQ_URL, headers=headers, json=body)
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"]
+        except (httpx.HTTPError, KeyError, IndexError) as e:
+            # Network failure, non-200 from Groq (bad/expired key, rate limit,
+            # wrong model), or malformed envelope. Surface as LLMError so callers
+            # can fall back to demo output instead of returning a 500.
+            raise LLMError(f"Groq request failed: {e}") from e
 
         try:
             parsed = json.loads(content)

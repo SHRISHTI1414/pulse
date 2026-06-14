@@ -368,6 +368,17 @@ def campaign_debrief(cid: int) -> DebriefEnvelope:
             schema_model=DebriefEnvelope,
         )
     except LLMError as e:
-        raise HTTPException(502, f"LLM error: {e}") from e
+        log.warning("debrief LLM unavailable (%s) — using deterministic demo fallback", e)
+        envelope = DebriefEnvelope(
+            narrative=(
+                f"Campaign {stats_full.campaign_id} reached "
+                f"{{fact:f_audience_size}} customers and recovered "
+                f"₹{{fact:f_recovered_revenue_inr}} across "
+                f"{{fact:f_attributed_orders}} attributed orders "
+                f"({{fact:f_recovery_rate_pct}}% recovery rate). "
+                "This summary was generated in demo mode without the live model."
+            ),
+            what_id_try_next="Test a weekday-morning resend to the non-responders in this cohort.",
+        )
 
     return envelope

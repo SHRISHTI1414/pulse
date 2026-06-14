@@ -23,6 +23,8 @@ from ..schemas import (
     DraftCampaignEnvelope,
     FactResolveOut,
     GeneratedOpportunitiesEnvelope,
+    GeneratedOpportunityItem,
+    MessageTier,
     OpportunityOut,
 )
 
@@ -147,6 +149,74 @@ def _opportunity_out(o: Opportunity) -> OpportunityOut:
     )
 
 
+# ── Deterministic demo fallbacks ────────────────────────────────────────────
+# Used when Groq is unavailable (no/expired GROQ_API_KEY, network failure, rate
+# limit). They keep the demo fully functional without an LLM provider and only
+# cite real fact_ids so downstream citation validation passes.
+
+_COHORT_COPY: dict[str, tuple[str, str]] = {
+    "lapsed_regulars": (
+        "Win back lapsed weekly regulars",
+        "Send a warm 'we miss you' WhatsApp with a returning-customer incentive.",
+    ),
+    "delivery_drift": (
+        "Re-engage dine-in regulars drifting to delivery",
+        "Invite them back in-store with a dine-in-only perk.",
+    ),
+    "festive_onetimers": (
+        "Convert festive one-timers into repeat buyers",
+        "Follow up with a time-boxed second-visit offer.",
+    ),
+}
+_COHORT_RANK = {"lapsed_regulars": 1, "delivery_drift": 2, "festive_onetimers": 3}
+
+
+def _fallback_opportunities(facts: list[dict]) -> GeneratedOpportunitiesEnvelope:
+    by_cohort: dict[str, list[dict]] = {}
+    for f in facts:
+        by_cohort.setdefault(FACTS[f["fact_id"]].cohort_ref, []).append(f)
+
+    items: list[GeneratedOpportunityItem] = []
+    for cohort in COHORT_REFS:
+        title, action = _COHORT_COPY[cohort]
+        cfacts = by_cohort.get(cohort, [])
+        size_fact = next((f["fact_id"] for f in cfacts if f["fact_id"].endswith("_size")), None)
+        cite = f" Roughly {{fact:{size_fact}}} customers are affected." if size_fact else ""
+        items.append(
+            GeneratedOpportunityItem(
+                title=title,
+                cohort_ref=cohort,  # type: ignore[arg-type]
+                reasoning=(
+                    f"{title}.{cite} This recommendation was generated in demo mode "
+                    "without the live strategist model."
+                ),
+                priority_rank=_COHORT_RANK[cohort],
+                recommended_action=action,
+            )
+        )
+    return GeneratedOpportunitiesEnvelope(opportunities=items)
+
+
+def _fallback_draft(cohort_ref: str) -> DraftCampaignEnvelope:
+    return DraftCampaignEnvelope(
+        name=f"{_COHORT_COPY[cohort_ref][0]} (demo draft)",
+        tiers=[
+            MessageTier(
+                name="Warm reminder",
+                whatsapp="Hi {{name}}, we miss you at Brew Street! Your usual is waiting whenever you are.",
+                sms="Hi {{name}}, we miss you at Brew Street. Drop by for your usual soon!",
+            ),
+            MessageTier(
+                name="Incentive",
+                whatsapp="Hi {{name}}, here's 20% off your next Brew Street order. See you soon!",
+                sms="Hi {{name}}, enjoy 20% off your next Brew Street order. See you soon!",
+            ),
+        ],
+        channel_strategy="Lead with WhatsApp for opted-in customers; fall back to SMS otherwise.",
+        suggested_send_time="Weekday mornings, 8–10am IST.",
+    )
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 
@@ -163,7 +233,8 @@ def generate_opportunities() -> list[OpportunityOut]:
             schema_model=GeneratedOpportunitiesEnvelope,
         )
     except LLMError as e:
-        raise HTTPException(502, f"LLM error: {e}") from e
+        log.warning("strategist LLM unavailable (%s) — using deterministic demo fallback", e)
+        envelope = _fallback_opportunities(facts)
 
     # Validate no hallucinated fact ids in reasoning.
     for item in envelope.opportunities:
@@ -265,7 +336,8 @@ def draft_campaign(oid: int) -> CampaignOut:
             schema_model=DraftCampaignEnvelope,
         )
     except LLMError as e:
-        raise HTTPException(502, f"LLM error: {e}") from e
+        log.warning("draft LLM unavailable (%s) — using deterministic demo fallback", e)
+        envelope = _fallback_draft(cohort_ref)
 
     # Convert tiers → message_templates dict. The Phase 2 send pipeline
     # currently uses only "default"; we pick tier 1 as default, store the
