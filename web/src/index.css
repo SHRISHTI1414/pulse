@@ -1,12 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-50: #fef7ed;
-  --color-brand-100: #fdedd3;
-  --color-brand-500: #e87722;
-  --color-brand-600: #c95f0e;
-  --color-brand-700: #a4500c;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Xeno-inspired blue palette — professional enterprise SaaS */
+  --color-brand-50: #eff4ff;
+  --color-brand-100: #dbe6fe;
+  --color-brand-200: #bfd3fe;
+  --color-brand-300: #93b4fd;
+  --color-brand-400: #6090fa;
+  --color-brand-500: #3b6ff6;
+  --color-brand-600: #2553eb;
+  --color-brand-700: #1d40d8;
+  --color-brand-800: #1e35af;
+  --color-brand-900: #1a2e6e;
+
+  --color-espresso-50: #f8fafc;
+  --color-espresso-100: #eef2f7;
+  --color-espresso-200: #dce4ed;
+  --color-espresso-300: #b8c5d4;
+  --color-espresso-400: #8896a7;
+  --color-espresso-500: #64748b;
+  --color-espresso-600: #475569;
+  --color-espresso-700: #334155;
+  --color-espresso-800: #1e293b;
+  --color-espresso-900: #0f172a;
+
+  --color-cream-50: #fafbfd;
+  --color-cream-100: #f5f7fa;
+  --color-cream-200: #edf0f5;
+
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
 }
 
 html, body, #root {
@@ -15,17 +38,98 @@ html, body, #root {
 
 body {
   margin: 0;
-  background: #fafaf7;
-  color: #1f2937;
+  background: var(--color-cream-100);
+  color: var(--color-espresso-900);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Subtle grain texture overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Card hover lift */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -8px rgba(15, 23, 42, 0.12);
+}
+
+/* Shimmer for loading states */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, #edf0f5 25%, #f5f7fa 50%, #edf0f5 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Drawer slide */
 .drawer-enter {
-  animation: slide-in 0.18s ease-out;
+  animation: slide-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
-
 @keyframes slide-in {
-  from { transform: translateX(20px); opacity: 0; }
+  from { transform: translateX(24px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
 }
+
+/* Pulse dot for live data */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.15); }
+}
+.live-dot {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+/* Gradient text */
+.text-gradient-brand {
+  background: linear-gradient(135deg, var(--color-brand-600), var(--color-brand-400));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hero glow */
+.hero-glow {
+  position: relative;
+}
+.hero-glow::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(ellipse at 30% 50%, rgba(37, 83, 235, 0.12), transparent 60%);
+  pointer-events: none;
+}
+
+/* Funnel bar segments */
+.funnel-segment {
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-espresso-200); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-espresso-300); }

@@ -10,16 +10,16 @@ export default function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-        <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-50 to-cream-200 border border-brand-100 flex items-center justify-center mb-5 shadow-sm">
+        <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-500">
           <circle cx="12" cy="12" r="10" />
-          <path d="M8 12h8" />
+          <path d="M12 8v4M12 16h.01" strokeLinecap="round" />
         </svg>
       </div>
-      <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-      {message && <p className="text-sm text-gray-500 mt-1 max-w-md">{message}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      <h3 className="font-display text-xl font-semibold text-espresso-900">{title}</h3>
+      {message && <p className="text-sm text-espresso-500 mt-2 max-w-md leading-relaxed">{message}</p>}
+      {action && <div className="mt-6">{action}</div>}
     </div>
   )
 }

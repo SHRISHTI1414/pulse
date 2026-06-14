@@ -1,49 +1,61 @@
-// Stacked horizontal bar for the message-status funnel.
-// Labels are user-friendly — internal status names ("queued", "sent") map
-// to "Queued for delivery", "Sent to carrier", etc.
-
-const ORDER: { key: string; label: string; userLabel: string; color: string }[] = [
-  { key: 'queued',    label: 'Queued',    userLabel: 'Waiting to send',    color: 'bg-gray-300' },
-  { key: 'sent',      label: 'Sent',      userLabel: 'Sent to carrier',    color: 'bg-blue-300' },
-  { key: 'delivered', label: 'Delivered', userLabel: 'Reached phone',      color: 'bg-blue-500' },
-  { key: 'read',      label: 'Read',      userLabel: 'Customer read it',   color: 'bg-emerald-500' },
-  { key: 'clicked',   label: 'Clicked',   userLabel: 'Tapped the link',    color: 'bg-brand-600' },
-  { key: 'failed',    label: 'Failed',    userLabel: 'Couldn’t deliver',   color: 'bg-red-400' },
+const ORDER: { key: string; userLabel: string; color: string; textColor: string }[] = [
+  { key: 'queued',    userLabel: 'Waiting to send',    color: 'bg-espresso-200',  textColor: 'text-espresso-600' },
+  { key: 'sent',      userLabel: 'Sent to carrier',    color: 'bg-blue-300',      textColor: 'text-blue-700' },
+  { key: 'delivered', userLabel: 'Reached phone',      color: 'bg-blue-500',      textColor: 'text-blue-800' },
+  { key: 'read',      userLabel: 'Customer read it',   color: 'bg-emerald-400',   textColor: 'text-emerald-800' },
+  { key: 'clicked',   userLabel: 'Tapped the link',    color: 'bg-brand-500',     textColor: 'text-brand-800' },
+  { key: 'failed',    userLabel: "Couldn't deliver",   color: 'bg-red-400',       textColor: 'text-red-700' },
 ]
 
 export default function FunnelBar({ byStatus, total }: { byStatus: Record<string, number>; total: number }) {
   if (total === 0) {
-    return <div className="text-sm text-gray-400">No messages yet.</div>
+    return (
+      <div className="flex items-center justify-center py-8 text-sm text-espresso-400 bg-cream-50 rounded-xl border border-dashed border-espresso-200">
+        No messages yet — send the campaign to see delivery stats here.
+      </div>
+    )
   }
+
+  const segments = ORDER.filter(({ key }) => (byStatus[key] ?? 0) > 0)
+
   return (
     <div>
-      <div className="flex h-3 w-full rounded-full overflow-hidden bg-gray-100">
-        {ORDER.map(({ key, color, userLabel }) => {
+      {/* Stacked bar */}
+      <div className="flex h-4 w-full rounded-full overflow-hidden bg-espresso-100 shadow-inner">
+        {segments.map(({ key, color, userLabel }) => {
           const n = byStatus[key] ?? 0
-          if (n === 0) return null
           const pct = (n / total) * 100
           return (
             <div
               key={key}
-              className={color}
+              className={`funnel-segment ${color} relative group`}
               style={{ width: `${pct}%` }}
-              title={`${userLabel}: ${n}`}
+              title={`${userLabel}: ${n.toLocaleString('en-IN')}`}
             />
           )
         })}
       </div>
-      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs">
-        {ORDER.map(({ key, userLabel, color }) => {
+
+      {/* Legend grid */}
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {segments.map(({ key, userLabel, color, textColor }) => {
           const n = byStatus[key] ?? 0
-          if (n === 0) return null
-          const pct = ((n / total) * 100).toFixed(0)
+          const pct = ((n / total) * 100).toFixed(1)
           return (
-            <div key={key} className="flex items-center gap-1.5 text-gray-700">
-              <span className={`inline-block w-2.5 h-2.5 rounded-sm ${color} shrink-0`} />
-              <span className="font-medium">{userLabel}</span>
-              <span className="text-gray-500 ml-auto tabular-nums">
-                {n.toLocaleString('en-IN')} <span className="text-gray-400">({pct}%)</span>
-              </span>
+            <div
+              key={key}
+              className="flex items-center gap-3 px-3 py-2 rounded-xl bg-cream-50 border border-espresso-50"
+            >
+              <span className={`inline-block w-3 h-3 rounded-full ${color} shrink-0 shadow-sm`} />
+              <div className="flex-1 min-w-0">
+                <div className={`text-xs font-semibold ${textColor}`}>{userLabel}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-sm font-semibold text-espresso-900 tabular-nums">
+                  {n.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[10px] text-espresso-400 tabular-nums">{pct}%</div>
+              </div>
             </div>
           )
         })}
