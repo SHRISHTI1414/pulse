@@ -16,6 +16,11 @@
 
 [Live App](https://pulse-azure-xi.vercel.app) · [API Docs](https://pulse-production-f909.up.railway.app/docs) · [Architecture](#-system-architecture) · [AI Workflow](#-ai-workflow)
 
+## Demo Video
+
+Watch the product walkthrough here:
+
+[Pulse Demo Video](https://app.heygen.com/videos/pulse-ai-native-revenue-recovery-crm-demo-45ba78807e3441c58a0fc9822ad78348)
 </div>
 
 ---
