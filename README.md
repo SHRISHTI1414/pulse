@@ -1,132 +1,293 @@
-# Pulse — an AI-native revenue-recovery CRM
+<div align="center">
 
-**Thesis:** Pulse does one job — find the revenue quietly leaking out of a brand's existing customer base, and win it back. An AI strategist analyzes order history, proposes complete win-back campaigns, and a human approves before anything is sent. **Every number the AI cites is clickable** and resolves to the live data behind it.
+# Pulse
 
-Built for the Xeno FDE assignment. Demo brand: **Brew Street**, a fictional 12-outlet coffee/QSR chain in Delhi NCR, with ~6,000 customers and 15 months of simulated order history.
+### An AI-Native Revenue Recovery CRM
 
-> **NOTE FOR CLAUDE CODE:** This README is the master spec. Work proceeds **strictly one phase at a time** — never build ahead into a later phase without being told "start Phase N". Before each phase, present a short plan and wait for approval. Ask before adding any dependency not listed. Simple > clever. No auth, no Docker for apps, no speculative abstractions.
+**Pulse doesn't just store your customers — it tells you where you're losing money, why, and exactly what to do about it.**
+
+[![Frontend](https://img.shields.io/badge/Live_Demo-Vercel-000000?logo=vercel&logoColor=white)](https://pulse-azure-xi.vercel.app)
+[![Backend API](https://img.shields.io/badge/API_Docs-Railway-0B0D0E?logo=railway&logoColor=white)](https://pulse-production-f909.up.railway.app/docs)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Groq](https://img.shields.io/badge/LLM-Groq-F55036?logo=groq&logoColor=white)](https://groq.com)
+
+[Live App](https://pulse-azure-xi.vercel.app) · [API Docs](https://pulse-production-f909.up.railway.app/docs) · [Architecture](#-system-architecture) · [AI Workflow](#-ai-workflow)
+
+</div>
 
 ---
 
-## 1. The problem
+## Overview
 
-A marketer at a multi-outlet QSR brand cannot see churn while it's happening. A customer who ordered 3x/week goes silent; nothing flags it; it surfaces months later as "flat revenue", when the win-back window has closed. The data to catch it in week one exists in the order history — but no one has time to interrogate it daily, build the segment, write the messages, pick the channel, and prove afterwards that the campaign (not coincidence) brought the customer back.
+**Pulse** is an AI-native CRM built around a single question every marketer actually cares about: *"Where is my revenue leaking, and what should I do about it today?"*
 
-**Pulse turns that entire loop into: review what the AI found → edit → approve → see recovered revenue.**
+Traditional CRMs are systems of record — they store who your customers are and what they bought. Pulse is a system of *action*. It continuously reads customer, order, communication, and campaign data, computes a set of named business facts, and uses an LLM strategist to surface ranked **revenue recovery opportunities**, draft win-back campaigns, execute them across channels, and measure the revenue actually recovered.
 
-## 2. The product loop (hero flow)
+The product is organized as one coherent, end-to-end AI loop:
 
-1. **Detect** — deterministic SQL computes facts about the customer base (lapse cohorts, values, channel engagement). The AI Strategist ranks the opportunities and explains why, citing only computed facts.
-2. **Decide** — for the top opportunity, the AI proposes a full campaign: audience, per-tier message drafts, WhatsApp-vs-SMS per customer, with evidence-linked reasoning. The marketer edits and approves. **The AI never sends autonomously.**
-3. **Deliver** — the CRM dispatches through a separate, stubbed **channel service** that simulates real-world delivery chaos and calls back asynchronously with receipts (delivered / read / clicked / failed).
-4. **Debrief** — receipts settle, recovered orders are attributed to the campaign (`last_touch_7d`), and the dashboard answers the only question that matters: **how much revenue did we recover?**
+> **Customer Data → Opportunity Discovery → AI Strategy → Campaign Generation → Campaign Execution → Performance Tracking → Revenue Attribution → AI Debrief**
 
-## 3. Architecture
+This repository is a fully working, deployed demonstration of that loop — built around a fictional 12-outlet Delhi-NCR coffee chain, *Brew Street*, seeded with 6,000 customers and ~152,000 orders.
 
-```
-┌─────────────┐   send API    ┌──────────────────┐
-│   crm-api    │ ────────────▶ │ channel-service   │  (separate FastAPI app)
-│  (FastAPI)   │ ◀──────────── │  simulates WA/SMS │
-│              │  async receipt │  outcomes + chaos │
-│  Postgres    │   callbacks    └──────────────────┘
-│  (Neon)      │
-│  Groq API    │ ◀── Strategist / compose / debrief prompts
-└──────┬───────┘
-       │ REST
-┌──────▼───────┐
-│  pulse-web    │  React + Vite + TS (separate repo, deployed on Vercel)
-└──────────────┘
-```
+---
 
-- **Two repos** (submission requirement): `pulse-crm-backend` (this repo: `crm-api/` + `channel-service/` + `scripts/` + `docs/`) and `pulse-crm-frontend` (`pulse-web`).
-- **LLM:** Groq API, model `llama-3.1-8b-instant` (free tier). Key in env (`GROQ_API_KEY`), never committed. Strict rule across all prompts: **the model may only cite numbers provided to it as computed facts; it never computes or invents figures.** Because the chosen model is small, Phase 3 enforces this with Groq's JSON mode + Pydantic schema validation + a single retry on schema failure.
-- **Channels modeled:** WhatsApp + SMS only (the authentic Indian-retail pair). SMS has no `read` state — the state machine encodes per-channel reality.
+## The Business Problem
 
-## 4. Data model (8 tables)
+Most customer revenue is lost quietly, not dramatically. A weekly regular slowly stops coming in. A dine-in loyalist drifts to delivery and orders less. A festival-season buyer never returns for a second visit. None of these trigger an alert in a normal CRM — they just show up later as a flat revenue line.
 
-`stores` (12 NCR outlets, 3 flagged office-district) · `customers` (persona-generated, ~85% whatsapp_opt_in) · `orders` (store, dine_in/takeaway/delivery, INR amounts, 15 months) · `opportunities` (cohort_definition jsonb, **facts jsonb** — `{fact_id, label, value, query_ref}` — llm_reasoning referencing fact ids, priority_rank, status) · `campaigns` (segment snapshot, message_templates per tier, draft→approved→sending→completed) · `messages` (channel, body, status: queued→sent→delivered→read→clicked, failed terminal; **SMS never enters read**) · `receipt_events` (**UNIQUE event_id = idempotency**) · `attributions` (order↔campaign↔message, model name).
+The marketer's real job is not *storing* this data — it's continuously answering:
 
-## 5. Simulated data (Phase 1 — DONE when verified)
+- **What is happening in my business right now?**
+- **Which customers are slipping away, and why?**
+- **What is the single highest-value action I can take today?**
+- **Did the action actually grow the business?**
 
-Generator: `scripts/generate_data.py` — reproducible from `--seed`, anchored to `--today 2026-06-14`, persona-based baseline (heavy_regular 8% / regular 20% / occasional 45% / one_timer 27%), morning + evening peaks, office stores skew weekday-morning. Three planted patterns:
+Doing this manually means writing SQL, exporting to spreadsheets, eyeballing cohorts, guessing at messaging, and rarely closing the loop on whether anything worked.
 
-| Pattern | Size | Shape | Why it exists |
-|---|---|---|---|
-| **Lapsed weekday regulars** (hero) | ~300 | 6+ months steady, office-district stores, hard stop ~Apr 25 2026 | The valuable, recoverable cohort the Strategist must surface first |
-| **Delivery drift** | ~450 | Shifted to 70%+ delivery, then 40–60% frequency decay, still active | Proves the AI distinguishes *at-risk* from *gone* |
-| **Festive one-timers** | ~700 | Diwali-window promo acquisitions, 1–2 gift orders, silence | The decoy: big cohort, poor odds — the AI must *deprioritize* it |
+---
 
-Verification: `scripts/verify_patterns.sql` — counts within ±10%, hero cohort clustered in office stores, annualized value in lakhs, organic weekly histogram. **Phase gate: these queries pass before Phase 2 starts.**
+## Why Traditional CRMs Fall Short
 
-## 6. Phase 2 — Channel service + receipt loop (the engineering centerpiece)
+| Traditional CRM | Pulse |
+|---|---|
+| System of **record** — stores customer data | System of **action** — converts data into decisions |
+| You query it; it waits | It scans the data and surfaces opportunities for you |
+| Reports describe *what happened* | The AI strategist recommends *what to do next* |
+| Campaign building is manual | AI drafts the audience, channel, and message |
+| Success measured in *opens & clicks* | Success measured in **revenue recovered** |
+| Insight and action live in different tools | Detect → explain → act → measure in one flow |
 
-### channel-service
-- `POST /send` — accepts batch: `[{message_id, channel, recipient, body}]`. Returns 202 immediately (`accepted` count). Processing is async.
-- For each message it simulates an outcome timeline, then **calls back** to crm-api `POST /receipts` with events. Event payload: `{event_id (uuid), message_id, event_type, occurred_at}`.
-- Outcome model: WhatsApp → sent → delivered (~94%) → read (~65% of delivered) → clicked (~22% of read); SMS → sent → delivered (~96%) → clicked (~6% of delivered, link click); failures: terminal `failed` instead of delivered.
-- **Chaos modes** via `POST /config {mode: "calm" | "hostile"}` (+ `GET /config`):
-  - **calm** — receipts arrive in order, 0.2–2s apart, ~2% failures, no duplicates.
-  - **hostile** — latency jitter 0.5–20s, ~15% failures, ~10% of events sent **twice** (same event_id), per-message event order **shuffled** (clicked may arrive before delivered), and ~5% of callback POSTs fail on first attempt → channel-service retries with exponential backoff (3 attempts).
-- In-memory asyncio task queue is fine. No DB in channel-service.
+A dashboard tells you the repeat-purchase rate dropped. It won't tell you *which 300 customers* drove the drop, *why* they lapsed, *what* to send them, and *how much* you got back. Pulse is built to answer exactly those four questions in sequence.
 
-### crm-api receipt loop
-- `POST /receipts` — idempotent ingestion: insert receipt_event; on `event_id` unique violation → 200 OK, no-op (duplicates absorbed silently, counted in logs).
-- **Status state machine** on messages: monotonic rank queued < sent < delivered < read < clicked; an event only advances status (late/duplicate lower-rank events update nothing but are still stored); `failed` only from queued/sent; **`read` illegal for SMS** (store event, don't transition, log warning). All transitions in one tested module: `app/state_machine.py`.
-- Campaign send pipeline: `POST /campaigns/{id}/send` → materialize audience from segment_definition → render per-tier bodies with personalization → create messages (`queued`) → batch-call channel-service `/send` (batches of 100) → mark `sent`. Campaign auto-completes when all messages reach a terminal/settled state or a timeout sweep runs.
-- **Tests (pytest, required):** state machine legal/illegal transitions incl. SMS-read; duplicate event_id absorbed; out-of-order sequence converges to correct final status.
-- **Phase gate:** 500 messages in hostile mode → every message's final status is consistent and correct; zero duplicate effects.
+---
 
-## 7. Phase 3 — The AI Strategist
+## How Pulse Solves It
 
-- `scripts/facts.py` / `app/facts.py`: named fact queries (each has `query_ref`): lapsed-regulars cohort + count + trailing-6mo value + annualized value + store concentration; delivery-drift cohort + decay %; festive cohort + repeat rate; per-cohort WhatsApp opt-in/engagement split. Output: facts jsonb array.
-- `POST /opportunities/generate` → compute facts → single Groq call (JSON mode + Pydantic validation + 1 retry) → **strict JSON out**: ranked opportunities `[{title, cohort_ref, reasoning (must reference fact_ids inline like {fact:f3}), priority_rank, recommended_action}]` → persist. Prompt rules: cite only provided fact_ids; no invented numbers; rank by recoverable value × recovery odds; explicitly deprioritize poor-odds cohorts with stated reason.
-- `GET /opportunities`, `GET /facts/{fact_id}/resolve` → re-runs the underlying query live, returns rows (powers **clickable evidence chips**).
-- `POST /opportunities/{id}/draft-campaign` → second Groq call: audience (from cohort_definition), 2–3 message tiers (grounded in actual cohort attributes, e.g. last-visited store name, favourite item category), channel strategy (WhatsApp if opt-in & engaged, else SMS), suggested send time. Marketer edit endpoints: `PATCH /campaigns/{id}`.
-- **Phase gate:** hero flow runs end-to-end via API: generate → inspect facts → draft → edit → approve → send (Phase 2 pipeline) → receipts land.
+Pulse treats the marketer's workflow as a pipeline and puts an AI strategist at the center of it:
 
-## 8. Phase 4 — Attribution, insights, debrief
+1. **Compute facts, not vibes.** A library of **13 named SQL facts** (cohort sizes, lapsed value, delivery-drift rates, festive dormancy, opt-in rates, etc.) is computed directly against the live database. These are deterministic, auditable numbers.
+2. **Constrain the AI to those facts.** The LLM strategist may only cite computed figures via `{fact:fX}` placeholders — it **never invents numbers**. Every claim in the UI is traceable to a SQL fact, and citations are validated server-side.
+3. **Rank opportunities by recoverable value × recovery odds**, so the marketer always starts with the highest-impact leak.
+4. **Generate the campaign** — audience snapshot, channel strategy, and tiered message copy — with one click, again grounded in facts.
+5. **Execute and track** through a channel service that simulates real-world delivery receipts (delivered → read → clicked → failed) asynchronously.
+6. **Attribute revenue** using a transparent `last_touch_7d` model and **debrief** the outcome in plain language.
 
-- **Recovery simulation:** `POST /simulate/recovery` on channel-service (or script) — for a configurable fraction (~25%) of customers whose message reached `read`/`clicked`, POST a new realistic order to crm-api **`POST /orders/ingest`** (public ingestion API — this is also the brief's "ingest" capability, exercised live) with 1–5 day simulated delay compressed for demo.
-- **Attribution:** on order ingestion, if customer has an engaged message (delivered+read or clicked) within the past 7 days → create attribution (`last_touch_7d`). Stated limitation in README: last-touch over-credits; no holdout group; acceptable and disclosed for this scope.
-- `GET /campaigns/{id}/stats` → funnel (queued/sent/delivered/read/clicked/failed), per-channel split, attributed orders + recovered revenue (₹), recovery rate vs cohort size.
-- **Debrief:** `POST /campaigns/{id}/debrief` → Groq writes a short narrative citing only the computed stats (same fact-id discipline), incl. "what I'd try next".
-- **Phase gate:** demo sequence works: send (hostile mode) → receipts settle → simulate recovery → recovered-revenue counter moves with attributions visible.
+> **Explainability is a first-class feature.** If the AI says "₹58L is recoverable from lapsed regulars," you can click through to the exact fact and the data behind it.
 
-## 9. Phase 5 — Frontend (pulse-web) + deployment
+---
 
-Three screens only, polished; nothing else gets UI:
-1. **Opportunities** — ranked cards: title, headline value at risk, reasoning with **clickable fact chips** (chip → drawer showing live resolved rows), actions: Draft campaign / Dismiss.
-2. **Campaign review** — audience summary (with peek at actual customer list), editable message tiers, channel split, Approve & Send. Chaos-mode toggle (calm/hostile) visible here or in a header — flipping it hits channel-service `/config`.
-3. **Results** — live-updating funnel, per-channel stats, **Recovered revenue ₹** counter, attributed orders list, AI debrief panel. (Poll every 2s; websockets not worth it.)
+## Key Features
 
-Stack: React + Vite + TS, Tailwind, react-router, fetch wrapper; clean component structure; no component library bloat. Loading/empty/error states for the three screens.
+- 🔍 **Opportunity Discovery** — AI scans the customer base and surfaces ranked revenue-recovery opportunities across three behavioral cohorts (lapsed regulars, delivery drift, festive one-timers).
+- 🧠 **Fact-Grounded AI Strategist** — every recommendation cites real, server-computed SQL facts; hallucinated figures are structurally impossible.
+- ✍️ **AI Campaign Generation** — one click drafts the audience, channel strategy, and multi-tier WhatsApp/SMS copy for a chosen cohort.
+- 📤 **Campaign Lifecycle** — draft → review → approve → send, with a clean state machine and human-in-the-loop approval.
+- 📡 **Channel Service (Simulated)** — an independent service that mimics real messaging delivery and returns asynchronous receipts through a status state machine.
+- 📈 **Performance Tracking** — per-campaign delivery, read, click, and conversion metrics.
+- 💰 **Revenue Attribution** — transparent `last_touch_7d` attribution linking recovered orders back to campaigns.
+- 🗣️ **AI Debrief** — an LLM-written post-mortem that cites only verified outcome stats and suggests the next experiment.
+- 🛡️ **Graceful Degradation** — if the LLM provider is unavailable, deterministic demo content keeps the entire flow functional.
 
-Deployment: crm-api + channel-service on **Render** (US East, next to Neon), `pulse-web` on **Vercel**. CORS configured via env. Production seeded by running the generator against the prod DATABASE_URL. Frontend env: `VITE_API_BASE_URL`.
+---
 
-## 10. Consciously NOT built (cuts are product decisions)
+## System Architecture
 
-No acquisition/leads/pipelines (out of brief scope) · No chat-first UI — chat is a poor surface for reviewing 300 names before messaging them; the AI proposes on visual surfaces · Email/RCS channels — two channels demonstrate channel *judgment*; four is breadth theater · No autonomous sending — human approval gate is a product position (brand-safety), not a gap · No CSV-upload chrome — ingestion is an API + documented generator · No auth/multi-tenancy · No drip journeys/scheduler — one-shot campaigns · No A/B testing.
+![Pulse Architecture](docs/crm.png)
 
-## 11. Scale assumptions (built vs. would-build)
-
-Built for ~10k messages/campaign: in-process async dispatch, batched sends, Postgres as the only store. At ~1M messages/day: a real queue (e.g. SQS/Kafka) replaces the in-process dispatch seam (code is shaped so that swap is one module), receipt ingestion becomes partitioned consumers keyed by message_id, stats move to incremental aggregates, and the channel callback contract gains signed payloads + replay windows. Attribution would need identity resolution + holdout groups.
-
-## 12. Env vars
+Pulse is a three-service application around a single PostgreSQL database:
 
 ```
-# crm-api
-DATABASE_URL=postgresql+psycopg://...
-GROQ_API_KEY=gsk_...
-GROQ_MODEL=llama-3.1-8b-instant
-CHANNEL_SERVICE_URL=http://localhost:8001
-
-# channel-service
-CRM_RECEIPT_URL=http://localhost:8000/receipts
-
-# pulse-web
-VITE_API_BASE_URL=http://localhost:8000
+┌──────────────────┐        ┌──────────────────────────────┐        ┌──────────────────────┐
+│   web (React)    │ HTTPS  │       crm-api (FastAPI)        │  HTTP  │  channel-service     │
+│  Vite + TS SPA   │ ─────► │  facts · LLM strategist · CRM  │ ─────► │  (FastAPI simulator) │
+│      Vercel      │        │  campaigns · attribution       │ ◄───── │  delivery receipts   │
+└──────────────────┘        └───────────────┬────────────────┘        └──────────────────────┘
+                                            │ SQLAlchemy
+                                   ┌────────▼────────┐         ┌──────────────┐
+                                   │   PostgreSQL    │         │   Groq LLM   │
+                                   │   (8 tables)    │         │  strategist  │
+                                   └─────────────────┘         └──────────────┘
 ```
 
-## 13. Repo conventions
+- **`web`** — React + TypeScript single-page app (Vite). Talks only to `crm-api`.
+- **`crm-api`** — the core service: computes facts, calls the Groq strategist, runs the campaign lifecycle, and performs revenue attribution. Tables are auto-created on startup.
+- **`channel-service`** — an independent FastAPI service that **simulates** message dispatch and asynchronously returns delivery/read/click receipts. It is a simulator, not a real messaging gateway.
+- **PostgreSQL** — 8 tables: `stores`, `customers`, `orders`, `opportunities`, `campaigns`, `messages`, `receipt_events`, `attributions`.
 
-Type hints everywhere · pydantic v2 schemas for all request/response bodies · tests for the state machine + receipt idempotency (minimum) · commit per completed step · `AI_WORKFLOW.md` logged manually as the build progresses · run services: `cd crm-api && uvicorn app.main:app --reload` / `cd channel-service && uvicorn app.main:app --port 8001 --reload`.
+> ⚠️ **Honest scope note:** the channel service is a faithful *simulation* of real-world communication systems for demo purposes. Pulse does **not** integrate with live WhatsApp/SMS providers. The simulation is detailed (async receipts, a delivery state machine, a configurable failure mode) but no real messages are sent.
+
+---
+
+## AI Workflow
+
+The LLM is used at three deliberate, narrow points — never as an opaque black box.
+
+| Stage | Input | LLM Role | Output | Guardrail |
+|---|---|---|---|---|
+| **1. Strategy** | 13 computed SQL facts | Rank cohorts by recoverable value × odds | 3 ranked opportunities with reasoning | Must cite `{fact:fX}`; citations validated; one retry on schema failure |
+| **2. Campaign Draft** | Cohort facts + opportunity reasoning | Write audience-appropriate copy | Name, channel strategy, 2 message tiers (WhatsApp + SMS) | Strict JSON schema (Pydantic); char limits enforced |
+| **3. Debrief** | Campaign outcome stats | Narrate what worked / what's next | 3–4 sentence post-mortem + next step | Cites only verified stat-facts |
+
+**Why this design holds up:**
+
+- **No invented numbers.** Figures are computed in SQL; the model only *references* them by id. Server-side validation strips any citation to an unknown fact.
+- **Strict JSON output** via Groq's JSON mode, validated against Pydantic schemas, with a single corrective retry before failing.
+- **Deterministic fallback.** If `GROQ_API_KEY` is unset or the provider errors, Pulse returns sensible demo strategy/copy/debrief output instead of crashing — the loop never breaks during a demo.
+
+---
+
+## Technology Stack
+
+**Frontend**
+- React 19 + TypeScript
+- Vite (build tool)
+- Tailwind CSS · React Router
+
+**Backend**
+- FastAPI (Python 3.12)
+- SQLAlchemy 2.0 (typed ORM)
+- PostgreSQL
+- Pydantic v2 (schema validation)
+
+**AI**
+- Groq LLM — `llama-3.1-8b-instant` (JSON mode, schema-validated)
+
+**Infrastructure**
+- Vercel (frontend hosting)
+- Railway (backend + managed PostgreSQL)
+
+---
+
+## Project Structure
+
+```
+pulse/
+├── crm-api/                 # Core FastAPI service
+│   └── app/
+│       ├── main.py          # App entry; auto-creates tables on startup
+│       ├── models.py        # SQLAlchemy models (8 tables)
+│       ├── schemas.py       # Pydantic request/response schemas
+│       ├── facts.py         # 13 named SQL facts + 3 cohort definitions
+│       ├── llm.py           # Groq client (JSON mode + retry)
+│       ├── state_machine.py # Message status transitions
+│       └── routers/         # opportunities · campaigns · audience ·
+│                            # orders · receipts · simulate · channel_config
+├── web/                     # React + TypeScript + Vite SPA
+│   └── src/                 # pages · components · lib (API client)
+├── channel-service/         # FastAPI delivery simulator (async receipts)
+├── scripts/                 # Data generation, table creation, phase gates
+│   ├── generate_data.py     # Seeds 6,000 customers + ~152k orders
+│   └── create_tables.py
+├── docs/                    # Architecture diagram + data spec
+└── README.md
+```
+
+---
+
+## Deployment
+
+Pulse runs as a deployed, publicly accessible demo.
+
+| Service | Platform | URL |
+|---|---|---|
+| Frontend | Vercel | https://pulse-azure-xi.vercel.app |
+| Backend API | Railway | https://pulse-production-f909.up.railway.app/docs |
+| Database | Railway PostgreSQL | (managed) |
+
+**Frontend → backend wiring:** the SPA reads its API base from `VITE_API_BASE_URL` (baked in at build time), pointed at the Railway backend.
+
+### Run locally
+
+```bash
+# 1. Backend (crm-api)
+cd crm-api
+pip install -r requirements.txt
+# set DATABASE_URL (Postgres) and optionally GROQ_API_KEY in ../.env
+uvicorn app.main:app --reload --port 8000   # tables auto-create on startup
+
+# 2. Seed demo data (6,000 customers, ~152k orders, 3 planted patterns)
+cd ..
+python scripts/generate_data.py
+
+# 3. Channel service (delivery simulator)
+cd channel-service
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8001
+
+# 4. Frontend
+cd ../web
+npm install
+echo "VITE_API_BASE_URL=http://localhost:8000" > .env
+npm run dev   # http://localhost:5173
+```
+
+> **Note:** `GROQ_API_KEY` is optional. Without it, Pulse serves deterministic demo strategy/copy so the full flow still works.
+
+---
+
+## Demo Walkthrough
+
+A 2-minute path through the entire revenue-recovery loop:
+
+1. **Brand Health** — open Pulse and immediately see the business state: at-risk customers, total revenue, and revenue at risk. *("What's happening right now?")*
+2. **Opportunity Discovery** — the AI presents ranked revenue leaks (e.g. *Lapsed Regulars — ₹58L recoverable*). *("What should I do today?")*
+3. **The Why** — open an opportunity to see the cited facts and a real sample of affected customers. *("Why these customers?")*
+4. **Campaign Generation** — one click drafts the audience, channel, and message tiers.
+5. **Review & Send** — approve the AI's draft and dispatch it through the channel service.
+6. **Performance Tracking** — watch delivery/read/click receipts flow back in.
+7. **Revenue Attribution** — recovered orders are linked back to the campaign via `last_touch_7d`.
+8. **AI Debrief** — a plain-language post-mortem citing the real outcome stats. *("Did the business actually grow?")*
+
+---
+
+## Design Philosophy
+
+- **AI as the protagonist, not a feature.** The strategist drives the workflow; the UI is built around its reasoning, not bolted on.
+- **Every number is traceable.** Facts are computed in SQL and cited by id. Trust comes from explainability, not confidence.
+- **Outcomes over vanity metrics.** The product is organized around *revenue recovered*, not opens and clicks.
+- **Answer the business question on screen one.** Revenue at risk, recovery opportunities, and the highest-value action are visible immediately — never hidden behind interactions.
+- **Honest about scope.** Simulated systems are labeled as simulated. The demo is impressive because it's real where it claims to be real.
+
+---
+
+## Lessons Learned
+
+- **Constraining the LLM made it trustworthy.** Forcing the model to cite pre-computed facts (rather than generate figures) eliminated hallucinated numbers and made the output auditable — the single most important design decision.
+- **Graceful degradation is a demo superpower.** Wrapping the LLM and the channel service so missing dependencies fall back to deterministic output meant the core flow never 500s, even with no API key or no messaging service deployed.
+- **Schema-create-on-startup beats forgotten migrations.** Auto-creating tables in the FastAPI lifespan removed an entire class of "relation does not exist" deployment failures.
+- **Build-time vs runtime config bites you.** Vite inlines env vars at build time, so connecting a deployed frontend to a deployed backend is a *rebuild*, not just an env edit — an easy multi-hour trap.
+- **Separation of services clarifies thinking.** Keeping delivery simulation in its own service kept the core CRM logic clean and made the messaging boundary explicit and honest.
+
+---
+
+## Future Roadmap
+
+Pulse is intentionally scoped as a focused demonstration. Natural next steps:
+
+- **Real channel integrations** — swap the simulator for live WhatsApp/SMS/email providers behind the same interface.
+- **Richer attribution** — add holdout groups and multi-touch models beyond `last_touch_7d`.
+- **Conversational CRM** — natural-language commands ("re-engage my lapsed Saket customers") that the AI compiles into campaigns.
+- **Autonomous agent mode** — give Pulse a goal ("increase repeat revenue 15%") and let it find audiences, run campaigns, and optimize within guardrails.
+- **Continuous scanning** — scheduled fact recomputation and proactive opportunity alerts.
+
+---
+
+## Author
+
+**Shrishti Yadav**
+
+Built as an end-to-end demonstration of an AI-native product workflow — from raw customer data to measured revenue impact.
+
+- **Live Demo:** https://pulse-azure-xi.vercel.app
+- **API Docs:** https://pulse-production-f909.up.railway.app/docs
+
+---
+
+<div align="center">
+
+*Pulse — find the revenue you're already losing.*
+
+</div>
